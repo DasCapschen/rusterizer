@@ -13,6 +13,7 @@ mod engine;
 mod renderer;
 mod vulkan;
 mod gui;
+mod ecs;
 
 //this should probably go somewhere else to be available globally
 enum ErrorCodes {

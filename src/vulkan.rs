@@ -1,6 +1,6 @@
 /*! File containing helper functions for Vulkan specific things */
 
-use std::{collections::HashSet, ffi::{CStr, CString}};
+use std::{collections::HashSet, marker::PhantomData, ffi::{CStr, CString}, num::NonZeroU32};
 use ash::{version::DeviceV1_0, vk::{self, QueueFamilyProperties}};
 use ash::version::{EntryV1_0, InstanceV1_0};
 use winit::window::Window;
@@ -19,6 +19,47 @@ pub struct SwapchainConfig {
     pub image_count: u32,
 }
 
+// ===== IMAGE =====
+/* should NEVER be mut, use according functions! */
+pub struct AllocatedImage {
+    pub image: vk::Image,
+    pub allocation: vk_mem::Allocation,
+    pub allocation_info: vk_mem::AllocationInfo,
+    pub format: vk::Format,
+    pub layout: vk::ImageLayout,
+    pub extent: vk::Extent3D,
+    pub layers: u32,
+    pub mip_levels: u32,
+    pub samples: vk::SampleCountFlags,
+    pub tiling: vk::ImageTiling,
+    pub sharing_mode: vk::SharingMode,
+    pub usage: vk::ImageUsageFlags
+}
+impl AllocatedImage {
+    pub fn destroy(self, allocator: &vk_mem::Allocator) {
+        allocator.destroy_image(self.image, &self.allocation);
+        self.image = vk::Image::null();
+    }
+}
+
+// ===== BUFFER =====
+pub struct AllocatedBuffer {
+    pub buffer: vk::Buffer,
+    pub allocation: vk_mem::Allocation,
+    pub allocation_info: vk_mem::AllocationInfo,
+    pub sharing_mode: vk::SharingMode,
+    pub usage: vk::BufferUsageFlags,
+    pub size: u64
+}
+impl AllocatedBuffer {
+    fn destroy(self, allocator: &vk_mem::Allocator) {
+        allocator.destroy_buffer(self.buffer, &self.allocation);
+        self.buffer = vk::Buffer::null();
+    }
+}
+
+
+// ===== FUNCTIONS =====
 pub fn create_instance(entry: &ash::Entry, window: &Window) -> ash::Instance {
 
     let app_name = CString::new("DOWA-rs").unwrap();
@@ -375,4 +416,241 @@ pub fn create_command_buffers(device: &ash::Device, command_pool: vk::CommandPoo
         .level(level);
     
     unsafe{ device.allocate_command_buffers(&info).expect("Cannot allocate command buffers!") }
+}
+
+/** All integers must be greater than 0! */
+pub fn create_image(allocator: &vk_mem::Allocator,
+    width: u32, height: u32, depth: u32, mip_levels: u32, layers: u32,
+    format: vk::Format, tiling: vk::ImageTiling, usage: vk::ImageUsageFlags,
+    sharing_mode: vk::SharingMode, mem_props: vk::MemoryPropertyFlags
+) -> AllocatedImage {
+    let extent = vk::Extent3D::builder()
+        .width(width).height(height).depth(depth).build();
+
+    let img_type = if width == 1 || height == 1 {
+        vk::ImageType::TYPE_1D
+    } else if depth == 1 {
+        vk::ImageType::TYPE_2D
+    } else {
+        vk::ImageType::TYPE_3D
+    };
+
+    let image_info = vk::ImageCreateInfo::builder()
+        .image_type(img_type)
+        .format(format)
+        .extent(extent)
+        .mip_levels(mip_levels)
+        .array_layers(layers)
+        .samples(vk::SampleCountFlags::TYPE_1) //TODO: MSAA
+        .tiling(tiling)
+        .usage(usage)
+        .sharing_mode(sharing_mode);
+
+    let allocation_info = vk_mem::AllocationCreateInfo {
+        required_flags: mem_props,
+        usage: find_vk_mem_usage(mem_props, false),
+        ..Default::default()
+    };
+
+    let (i, a, info) = allocator.create_image(&image_info, &allocation_info)
+        .expect("Cannot allocate image");
+
+    AllocatedImage {
+        image: i,
+        allocation: a,
+        allocation_info: info,
+        extent,
+        format,
+        layout: vk::ImageLayout::UNDEFINED,
+        tiling,
+        usage,
+        layers,
+        mip_levels,
+        samples: vk::SampleCountFlags::TYPE_1,
+        sharing_mode
+    }
+}
+
+pub fn create_image_view(device: &ash::Device, image: &AllocatedImage, 
+    view_type: vk::ImageViewType, format:vk::Format, aspect: vk::ImageAspectFlags,
+    mip_count: u32, mip_base: u32, layer_count: u32, layer_base: u32, 
+) -> vk::ImageView {
+
+    let components = vk::ComponentMapping::builder()
+        .r(vk::ComponentSwizzle::IDENTITY)
+        .g(vk::ComponentSwizzle::IDENTITY)
+        .b(vk::ComponentSwizzle::IDENTITY)
+        .a(vk::ComponentSwizzle::IDENTITY)
+        .build();
+
+    let subresource_range = vk::ImageSubresourceRange::builder()
+        .aspect_mask(aspect)
+        .base_mip_level(mip_base)
+        .level_count(mip_count)
+        .base_array_layer(layer_base)
+        .layer_count(layer_count)
+        .build();
+
+    let info = vk::ImageViewCreateInfo::builder()
+        .image(image.image)
+        .view_type(view_type)
+        .format(format)
+        .components(components)
+        .subresource_range(subresource_range);
+
+    unsafe { device.create_image_view(&info, None).expect("Cannot create image view!") }
+}
+
+pub fn create_buffer(allocator: &vk_mem::Allocator, size: u64,
+    sharing_mode: vk::SharingMode, usage: vk::BufferUsageFlags, 
+    memory_properties: vk::MemoryPropertyFlags
+) -> AllocatedBuffer {
+    let buffer_info = vk::BufferCreateInfo::builder()
+        .sharing_mode(sharing_mode)
+        .usage(usage)
+        .size(size);
+
+    let allocation_info = vk_mem::AllocationCreateInfo {
+        required_flags: memory_properties,
+        usage: find_vk_mem_usage(memory_properties, false),
+        ..Default::default()
+    };
+
+    let (b, a, ai) = allocator.create_buffer(&buffer_info, &allocation_info).expect("Could not create buffer!");
+
+    AllocatedBuffer {
+        buffer: b,
+        allocation: a,
+        allocation_info: ai,
+        sharing_mode,
+        usage,
+        size
+    }
+}
+
+
+fn find_vk_mem_usage(properties: vk::MemoryPropertyFlags, read: bool)
+-> vk_mem::MemoryUsage {
+    if properties.contains(vk::MemoryPropertyFlags::DEVICE_LOCAL) {
+        return vk_mem::MemoryUsage::GpuOnly;
+    }
+    else if properties.contains(vk::MemoryPropertyFlags::HOST_VISIBLE) {
+        if properties.contains(vk::MemoryPropertyFlags::HOST_COHERENT) {
+            return vk_mem::MemoryUsage::CpuOnly;
+        }
+
+        if read {
+            return vk_mem::MemoryUsage::GpuToCpu;
+        }
+
+        return vk_mem::MemoryUsage::CpuToGpu;
+    }
+
+    return vk_mem::MemoryUsage::Unknown;
+}
+
+
+/* Records into command buffer. Must still be commited! */
+pub fn set_image_layout(device: &ash::Device, 
+    command_buffer: vk::CommandBuffer,
+    image: AllocatedImage, 
+    new_layout: vk::ImageLayout, 
+    aspect: vk::ImageAspectFlags,
+    pipeline_src_stage: vk::PipelineStageFlags,
+    pipeline_dst_stage: vk::PipelineStageFlags
+) -> AllocatedImage {
+
+    let subresource_range = vk::ImageSubresourceRange::builder()
+        .aspect_mask(aspect)
+        .base_array_layer(0)
+        .base_mip_level(0)
+        .layer_count(image.layers)
+        .level_count(image.mip_levels)
+        .build();
+
+    let (src, dst) = find_image_access_masks(image.layout, new_layout);
+
+    let barrier = vk::ImageMemoryBarrier::builder()
+        .image(image.image)    
+        .src_access_mask(src)
+        .dst_access_mask(dst)
+        .old_layout(image.layout)
+        .new_layout(new_layout)
+        .subresource_range(subresource_range)
+        .build();
+
+    let memory_barriers = [];
+    let buffer_memory_barriers = [];
+    let image_memory_barriers = [barrier];
+
+    unsafe { device.cmd_pipeline_barrier(command_buffer, 
+        pipeline_src_stage, 
+        pipeline_dst_stage, 
+        vk::DependencyFlags::empty(), 
+        &memory_barriers, 
+        &buffer_memory_barriers, 
+        &image_memory_barriers
+    ); }
+
+    image.layout = new_layout;
+    image
+}
+
+fn find_image_access_masks(old_layout: vk::ImageLayout, new_layout: vk::ImageLayout) -> (vk::AccessFlags, vk::AccessFlags) {
+    let src = match old_layout {
+        vk::ImageLayout::PREINITIALIZED => vk::AccessFlags::HOST_WRITE,
+        vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL => vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+        vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL => vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
+        vk::ImageLayout::TRANSFER_SRC_OPTIMAL => vk::AccessFlags::TRANSFER_READ,
+        vk::ImageLayout::TRANSFER_DST_OPTIMAL => vk::AccessFlags::TRANSFER_WRITE,
+        vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL => vk::AccessFlags::SHADER_READ,
+        _ => vk::AccessFlags::empty()
+    };
+
+    let dst = match new_layout {
+        vk::ImageLayout::TRANSFER_DST_OPTIMAL => vk::AccessFlags::TRANSFER_WRITE,
+        vk::ImageLayout::TRANSFER_SRC_OPTIMAL => vk::AccessFlags::TRANSFER_READ,
+        vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL => vk::AccessFlags::COLOR_ATTACHMENT_READ | vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+        vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL => vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
+        vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL => vk::AccessFlags::SHADER_READ,
+        _ => vk::AccessFlags::empty()
+    };
+
+    //special case
+    if dst == vk::AccessFlags::SHADER_READ && src.is_empty() {
+        let src = vk::AccessFlags::HOST_WRITE | vk::AccessFlags::TRANSFER_WRITE;
+        return (src, dst);
+    }
+
+    return (src,dst);
+}
+
+//copies buffer into the WHOLE image, mip 0 layer 0
+pub fn copy_buffer_to_image(device: &ash::Device, command_buffer: vk::CommandBuffer,
+    image: &AllocatedImage, aspect: vk::ImageAspectFlags,
+    buffer: &AllocatedBuffer, ) 
+{
+    let image_subresource = vk::ImageSubresourceLayers::builder()
+        .aspect_mask(aspect)
+        .mip_level(0)
+        .base_array_layer(0)
+        .layer_count(image.layers)
+        .build();
+
+    let image_offset = vk::Offset3D {
+        x: 0, y: 0, z: 0
+    };
+
+    let region = vk::BufferImageCopy::builder()
+        .buffer_offset(0)
+        .buffer_row_length(0)
+        .buffer_image_height(0)
+        .image_subresource(image_subresource)
+        .image_offset(image_offset)
+        .image_extent(image.extent)
+        .build();
+    
+    let regions = [region];
+
+    unsafe { device.cmd_copy_buffer_to_image(command_buffer, buffer.buffer, image.image, vk::ImageLayout::TRANSFER_DST_OPTIMAL, &regions); }
 }

@@ -7,7 +7,8 @@ use std::cell::RefCell;
 use crate::{gui, vulkan};
 use ash::{version::{EntryV1_0, DeviceV1_0, InstanceV1_0}, vk};
 use winit::window::Window;
-use imgui_rs_vulkan_renderer::RendererVkContext;
+
+use vk_mem::Allocator;
 
 struct Vk {
     entry: ash::Entry,
@@ -16,6 +17,8 @@ struct Vk {
     physical_device: vk::PhysicalDevice,
     device: ash::Device,
     queue_families: vulkan::QueueFamilyIndices,
+
+    allocator: vk_mem::Allocator,
 
     surface_loader: ash::extensions::khr::Surface,
     surface: vk::SurfaceKHR,
@@ -33,29 +36,6 @@ struct Vk {
     framebuffers: Vec<vk::Framebuffer>,
     command_pool: vk::CommandPool,
     command_buffers: Vec<vk::CommandBuffer>,
-}
-
-//needed for imgui renderer
-impl RendererVkContext for Vk {
-    fn instance(&self) -> &ash::Instance {
-        &self.instance
-    }
-
-    fn physical_device(&self) -> vk::PhysicalDevice {
-        self.physical_device
-    }
-
-    fn device(&self) -> &ash::Device {
-        &self.device
-    }
-
-    fn queue(&self) -> vk::Queue {
-        vulkan::get_graphics_queue(&self.device, &self.queue_families)
-    }
-
-    fn command_pool(&self) -> vk::CommandPool {
-        self.command_pool
-    }
 }
 
 //clean up vulkan resources
@@ -106,16 +86,7 @@ impl Drop for Vk {
 //is RefCell really the best idea, or would it be better if Renderer itself was just mutable?
 pub struct Renderer {
     vk: Vk,
-    imgui_renderer: imgui_rs_vulkan_renderer::Renderer,
-}
-
-impl Drop for Renderer {
-    fn drop(&mut self) {
-        unsafe{ self.vk.device.device_wait_idle().expect("Cannot wait on device Idle!"); }
-
-        self.imgui_renderer.destroy(&self.vk).expect("Cannot destroy imgui renderer!");
-        //vk is automatically dropped hereafter
-    }
+    gui_renderer: gui::GuiRenderer,
 }
 
 pub fn create_renderer(window: &Window, gui_context: &mut imgui::Context) -> Renderer {
@@ -132,6 +103,16 @@ pub fn create_renderer(window: &Window, gui_context: &mut imgui::Context) -> Ren
     let pdevice = vulkan::select_physical_device(&instance, &surface_ext, surface);
     let q_families = vulkan::find_queue_family_indices(&instance, pdevice, &surface_ext, surface);
     let ldevice = vulkan::create_logical_device(&instance, pdevice, &q_families);
+
+    //memory allocator (vma)
+    let allocator_info = vk_mem::AllocatorCreateInfo {
+        physical_device: pdevice,
+        device: ldevice,
+        instance: instance,
+        ..Default::default()
+    };
+
+    let allocator = vk_mem::Allocator::new(&allocator_info).expect("Cannot create allocator!");
 
     let size: (u32,u32) = window.inner_size().into();
 
@@ -163,6 +144,8 @@ pub fn create_renderer(window: &Window, gui_context: &mut imgui::Context) -> Ren
         physical_device: pdevice,
         device: ldevice,
 
+        allocator: allocator,
+
         queue_families: q_families,
 
         surface_loader: surface_ext,
@@ -183,11 +166,13 @@ pub fn create_renderer(window: &Window, gui_context: &mut imgui::Context) -> Ren
         command_buffers: command_buffers
     };
 
-    let imgui_renderer = imgui_rs_vulkan_renderer::Renderer::new(&vk, 1, render_pass, gui_context).expect("Cannot create imgui renderer");
+    //let imgui_renderer = imgui_rs_vulkan_renderer::Renderer::new(&vk, 1, render_pass, gui_context).expect("Cannot create imgui renderer");
+
+    let gui_renderer = gui::create_renderer();
 
     Renderer {
         vk,
-        imgui_renderer: /*RefCell::new(*/imgui_renderer//)
+        gui_renderer
     }
 
 }
@@ -196,6 +181,7 @@ pub fn draw_frame(renderer: &mut Renderer, gui_data: &imgui::DrawData) {
     //TODO: wait for Fence instead!
     unsafe{ renderer.vk.device.device_wait_idle().expect("Cannot wait for device idle!!"); }
 
+    //should we really record commands everytime we draw?
     record_commands(renderer, gui_data);
 
     let result = unsafe {
@@ -257,7 +243,8 @@ fn record_commands(renderer: &mut Renderer, gui_data: &imgui::DrawData) {
         unsafe { vk.device.cmd_begin_render_pass(*cmdbuf, &render_pass_info, vk::SubpassContents::INLINE) }
 
         //TODO: draw something
-        imgui_renderer.cmd_draw(vk, *cmdbuf, gui_data).expect("Cannot record imgui draw commands!");
+        gui::record_draw_commands(*cmdbuf, gui_data);
+        //imgui_renderer.cmd_draw(vk, *cmdbuf, gui_data).expect("Cannot record imgui draw commands!");
 
         unsafe{ vk.device.cmd_end_render_pass(*cmdbuf) }
         unsafe{ vk.device.end_command_buffer(*cmdbuf).expect("Cannot end command buffer!") }
