@@ -51,15 +51,16 @@ pub fn create_renderer(
     render_pass: vk::RenderPass,
     subpass: u32,
     allocator: &vk_mem::Allocator,
-    gui: &Gui,
+    gui: &mut Gui,
 ) -> GuiRenderer {
-    let atlas = gui.context.fonts().build_rgba32_texture();
 
-    let width = atlas.width;
-    let height = atlas.height;
-    let size = atlas.data.len();
+    let width = gui.context.io().display_size[0];
+    let height = gui.context.io().display_size[1];
 
-    let font_image = vulkan::create_image(
+    let mut fonts = gui.context.fonts();
+    let atlas = fonts.build_rgba32_texture();
+
+    let mut font_image = vulkan::create_image(
         allocator,
         atlas.width,
         atlas.height,
@@ -87,7 +88,7 @@ pub fn create_renderer(
 
     let staging_buffer = vulkan::create_buffer(
         allocator,
-        size as u64,
+        atlas.data.len() as u64,
         vk::SharingMode::EXCLUSIVE,
         vk::BufferUsageFlags::TRANSFER_SRC,
         vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
@@ -112,7 +113,7 @@ pub fn create_renderer(
     unsafe {
         device.begin_command_buffer(cmdbuf[0], &begin_info);
 
-        let font_image = vulkan::set_image_layout(
+        font_image = vulkan::set_image_layout(
             device,
             cmdbuf[0],
             font_image,
@@ -130,7 +131,7 @@ pub fn create_renderer(
             &staging_buffer,
         );
 
-        let font_image = vulkan::set_image_layout(
+        font_image = vulkan::set_image_layout(
             device,
             cmdbuf[0],
             font_image,
@@ -207,9 +208,6 @@ pub fn create_renderer(
         .compare_op(vk::CompareOp::ALWAYS)
         .build();
 
-    let width = gui.context.io().display_size[0];
-    let height = gui.context.io().display_size[1];
-
     //Create Pipeline
     let pipeline = vulkan::Pipeline::builder(device)
         .cache()
@@ -262,14 +260,10 @@ pub fn create_renderer(
         .add_shader_stage(
             "res/imgui.vert",
             vk::ShaderStageFlags::VERTEX,
-            "main".to_owned(),
-            None,
         )
         .add_shader_stage(
             "res/imgui.frag",
             vk::ShaderStageFlags::FRAGMENT,
-            "main".to_owned(),
-            None,
         )
         .add_vertex_binding(
             0,

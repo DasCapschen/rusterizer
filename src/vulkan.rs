@@ -54,7 +54,6 @@ pub struct AllocatedImage {
 impl AllocatedImage {
     pub fn destroy(self, allocator: &vk_mem::Allocator) {
         allocator.destroy_image(self.image, &self.allocation);
-        self.image = vk::Image::null();
     }
 }
 
@@ -70,7 +69,6 @@ pub struct AllocatedBuffer {
 impl AllocatedBuffer {
     fn destroy(self, allocator: &vk_mem::Allocator) {
         allocator.destroy_buffer(self.buffer, &self.allocation);
-        self.buffer = vk::Buffer::null();
     }
 }
 
@@ -711,7 +709,7 @@ fn find_vk_mem_usage(properties: vk::MemoryPropertyFlags, read: bool) -> vk_mem:
 pub fn set_image_layout(
     device: &ash::Device,
     command_buffer: vk::CommandBuffer,
-    image: AllocatedImage,
+    mut image: AllocatedImage,
     new_layout: vk::ImageLayout,
     aspect: vk::ImageAspectFlags,
     pipeline_src_stage: vk::PipelineStageFlags,
@@ -955,23 +953,23 @@ impl Pipeline {
 pub struct PipelineBuilder<'a> {
     device: &'a ash::Device,
     flags: vk::PipelineCreateFlags,
-    shader_stages: Vec<vk::PipelineShaderStageCreateInfoBuilder<'a>>,
+    shader_stages: Vec<vk::PipelineShaderStageCreateInfo>,
     specialisation_info: Vec<vk::SpecializationInfo>,
 
-    vertex_input: vk::PipelineVertexInputStateCreateInfoBuilder<'a>,
-    vertex_bindings: Vec<vk::VertexInputBindingDescriptionBuilder<'a>>,
-    vertex_attributes: Vec<vk::VertexInputAttributeDescriptionBuilder<'a>>,
+    vertex_input: vk::PipelineVertexInputStateCreateInfo,
+    vertex_bindings: Vec<vk::VertexInputBindingDescription>,
+    vertex_attributes: Vec<vk::VertexInputAttributeDescription>,
 
     viewports: Vec<vk::Viewport>,
     scissors: Vec<vk::Rect2D>,
 
     dynamic_states: Vec<vk::DynamicState>,
 
-    color_blend_info: vk::PipelineColorBlendStateCreateInfoBuilder<'a>,
-    color_blend_attachments: Vec<vk::PipelineColorBlendAttachmentStateBuilder<'a>>,
+    color_blend_info: vk::PipelineColorBlendStateCreateInfo,
+    color_blend_attachments: Vec<vk::PipelineColorBlendAttachmentState>,
 
     descriptor_set_layouts: Vec<vk::DescriptorSetLayout>,
-    push_constant_ranges: Vec<vk::PushConstantRangeBuilder<'a>>,
+    push_constant_ranges: Vec<vk::PushConstantRange>,
 
     render_pass: vk::RenderPass,
     subpass: u32,
@@ -979,13 +977,15 @@ pub struct PipelineBuilder<'a> {
     base_pipeline: vk::Pipeline,
     base_pipeline_index: i32,
 
-    input_assembly: Option<vk::PipelineInputAssemblyStateCreateInfoBuilder<'a>>,
-    tesselation_info: Option<vk::PipelineTessellationStateCreateInfoBuilder<'a>>,
-    rasterizer_info: Option<vk::PipelineRasterizationStateCreateInfoBuilder<'a>>,
-    multisample_info: Option<vk::PipelineMultisampleStateCreateInfoBuilder<'a>>,
+    input_assembly: Option<vk::PipelineInputAssemblyStateCreateInfo>,
+    tesselation_info: Option<vk::PipelineTessellationStateCreateInfo>,
+    rasterizer_info: Option<vk::PipelineRasterizationStateCreateInfo>,
+    multisample_info: Option<vk::PipelineMultisampleStateCreateInfo>,
     multisample_mask: Option<vk::SampleMask>,
-    depth_stencil_info: Option<vk::PipelineDepthStencilStateCreateInfoBuilder<'a>>,
-    pipeline_cache: Option<vk::PipelineCacheCreateInfoBuilder<'a>>,
+    depth_stencil_info: Option<vk::PipelineDepthStencilStateCreateInfo>,
+    pipeline_cache: Option<vk::PipelineCacheCreateInfo>,
+
+    shader_entry_point: CString
 }
 impl<'a> Drop for PipelineBuilder<'a> {
     fn drop(&mut self) {
@@ -999,13 +999,13 @@ impl<'a> PipelineBuilder<'a> {
             flags: vk::PipelineCreateFlags::empty(),
             shader_stages: vec![],
             specialisation_info: vec![],
-            vertex_input: vk::PipelineVertexInputStateCreateInfo::builder(),
+            vertex_input: vk::PipelineVertexInputStateCreateInfo::default(),
             vertex_bindings: vec![],
             vertex_attributes: vec![],
             viewports: vec![],
             scissors: vec![],
             dynamic_states: vec![],
-            color_blend_info: vk::PipelineColorBlendStateCreateInfo::builder(),
+            color_blend_info: vk::PipelineColorBlendStateCreateInfo::default(),
             color_blend_attachments: vec![],
             descriptor_set_layouts: vec![],
             push_constant_ranges: vec![],
@@ -1020,20 +1020,18 @@ impl<'a> PipelineBuilder<'a> {
             multisample_mask: None,
             depth_stencil_info: None,
             pipeline_cache: None,
+            shader_entry_point: CString::new("main").expect("ficken")
         }
     }
 
-    pub fn flags(self, flags: vk::PipelineCreateFlags) -> Self {
+    pub fn flags(mut self, flags: vk::PipelineCreateFlags) -> Self {
         self.flags = flags;
         self
     }
 
-    pub fn add_shader_stage(
-        self,
+    pub fn add_shader_stage(mut self,
         file: &str,
-        stage: vk::ShaderStageFlags,
-        entry_point: String,
-        specialization: Option<vk::SpecializationInfo>,
+        stage: vk::ShaderStageFlags
     ) -> Self {
         let mut shader_file = File::open(file).expect("Cannot open shader file!");
         let code = ash::util::read_spv(&mut shader_file).expect("Cannot read SPIR-V!");
@@ -1046,32 +1044,19 @@ impl<'a> PipelineBuilder<'a> {
                 .expect("Cannot create shader module!")
         };
 
-        //we'll have to keep the string stored, ey?
-        //since it takes a REFERENCE (that fucking bitch)
-        //so this will drop before shader will...
-        //lifetime issue
-        let name = CString::new(entry_point).expect("FICK DICH DOCH DU HURE");
-
-        let shader = vk::PipelineShaderStageCreateInfo::builder()
+        let shader = vk::PipelineShaderStageCreateInfo::builder::<'a>()
             .stage(stage)
             .module(module)
-            .name(name.as_c_str());
+            .name(self.shader_entry_point.as_c_str())
+            .build();
 
-        //this won't work, will it? (lifetime issue)
-        if let Some(spec) = specialization {
-            shader.specialization_info(&spec);
-        }
+        //entry point is set later, because some WHORESON though it was funny to put a POINTER to the string...
 
-        //really, borrow checker? no problem here?
-        //&spec and name.as_c_str() should cause lifetime issues...
-        //or are they implicitly assigned the lifetime of self? ('a) ?
-        //if so how is name kept around? it's a local variable...
         self.shader_stages.push(shader);
         self
     }
 
-    pub fn add_vertex_binding(
-        self,
+    pub fn add_vertex_binding(mut self,
         binding: u32,
         stride: u32,
         input_rate: vk::VertexInputRate,
@@ -1079,15 +1064,14 @@ impl<'a> PipelineBuilder<'a> {
         let binding = vk::VertexInputBindingDescription::builder()
             .binding(binding)
             .input_rate(input_rate)
-            .stride(stride);
+            .stride(stride)
+            .build();
 
         self.vertex_bindings.push(binding);
-
         self
     }
 
-    pub fn add_vertex_attribute(
-        self,
+    pub fn add_vertex_attribute(mut self,
         location: u32,
         binding: u32,
         format: vk::Format,
@@ -1097,33 +1081,35 @@ impl<'a> PipelineBuilder<'a> {
             .location(location)
             .binding(binding)
             .format(format)
-            .offset(offset);
+            .offset(offset)
+            .build();
 
         self.vertex_attributes.push(attribute);
         self
     }
 
-    pub fn input_assembly(self, topology: vk::PrimitiveTopology, primitive_restart: bool) -> Self {
+    pub fn input_assembly(mut self, topology: vk::PrimitiveTopology, primitive_restart: bool) -> Self {
         self.input_assembly = Some(
             vk::PipelineInputAssemblyStateCreateInfo::builder()
                 .topology(topology)
-                .primitive_restart_enable(primitive_restart),
+                .primitive_restart_enable(primitive_restart)
+                .build()
         );
 
         self
     }
 
-    pub fn tesselation(self, patch_control_points: u32) -> Self {
+    pub fn tesselation(mut self, patch_control_points: u32) -> Self {
         self.tesselation_info = Some(
             vk::PipelineTessellationStateCreateInfo::builder()
-                .patch_control_points(patch_control_points),
+                .patch_control_points(patch_control_points)
+                .build()
         );
 
         self
     }
 
-    pub fn add_viewport(
-        self,
+    pub fn add_viewport(mut self,
         x: f32,
         y: f32,
         width: f32,
@@ -1145,7 +1131,7 @@ impl<'a> PipelineBuilder<'a> {
         self
     }
 
-    pub fn add_scissor(self, x: i32, y: i32, width: u32, height: u32) -> Self {
+    pub fn add_scissor(mut self, x: i32, y: i32, width: u32, height: u32) -> Self {
         let offset = vk::Offset2D::builder().x(x).y(y).build();
         let extent = vk::Extent2D::builder().width(width).height(height).build();
 
@@ -1157,7 +1143,7 @@ impl<'a> PipelineBuilder<'a> {
     }
 
     pub fn rasterizer(
-        self,
+        mut self,
         enable_discard: bool,
         enable_depth_clamp: bool,
         enable_depth_bias: bool,
@@ -1180,14 +1166,15 @@ impl<'a> PipelineBuilder<'a> {
                 .polygon_mode(polygon_mode)
                 .front_face(front_face)
                 .cull_mode(cull_mode)
-                .line_width(line_width),
+                .line_width(line_width)
+                .build()
         );
 
         self
     }
 
     pub fn multisample(
-        self,
+        mut self,
         samples: vk::SampleCountFlags,
         enable_sample_shading: bool,
         min_sample_shading: f32,
@@ -1195,27 +1182,28 @@ impl<'a> PipelineBuilder<'a> {
         enable_alpha_to_one: bool,
         sample_mask: Option<vk::SampleMask>,
     ) -> Self {
-        let builder = vk::PipelineMultisampleStateCreateInfo::builder()
+        let msaa = vk::PipelineMultisampleStateCreateInfo::builder()
             .rasterization_samples(samples)
             .sample_shading_enable(enable_sample_shading)
             .min_sample_shading(min_sample_shading)
             .alpha_to_coverage_enable(enable_alpha_to_coverage)
-            .alpha_to_one_enable(enable_alpha_to_one);
+            .alpha_to_one_enable(enable_alpha_to_one)
+            .build();
 
-        //isn't this gonna create lifetime problems?
-        if let Some(mask) = sample_mask {
-            let masks = [mask];
-            builder.sample_mask(&masks);
-        }
+        //isn't this gonna create lifetime problems? YES
+        //if let Some(mask) = sample_mask {
+        //    let masks = [mask];
+        //    builder = builder.sample_mask(&masks);
+        //}
 
-        self.multisample_mask = sample_mask;
-        self.multisample_info = Some(builder);
+        self.multisample_mask = None;
+        self.multisample_info = Some(msaa);
 
         self
     }
 
     pub fn depth_stencil(
-        self,
+        mut self,
         enable_depth_test: bool,
         enable_depth_write: bool,
         enable_bounds_test: bool,
@@ -1236,14 +1224,15 @@ impl<'a> PipelineBuilder<'a> {
                 .max_depth_bounds(max_bound)
                 .depth_compare_op(depth_compare_op)
                 .front(stencil_front)
-                .back(stencil_back),
+                .back(stencil_back)
+                .build()
         );
 
         self
     }
 
     pub fn add_color_blend_attachment(
-        self,
+        mut self,
         enable_blend: bool,
         src_color_factor: vk::BlendFactor,
         dst_color_factor: vk::BlendFactor,
@@ -1261,14 +1250,15 @@ impl<'a> PipelineBuilder<'a> {
             .src_alpha_blend_factor(src_alpha_factor)
             .dst_alpha_blend_factor(dst_alpha_factor)
             .alpha_blend_op(alpha_blend_op)
-            .color_write_mask(color_write_mask);
+            .color_write_mask(color_write_mask)
+            .build();
 
         self.color_blend_attachments.push(attachment);
         self
     }
 
     pub fn color_blend_info(
-        self,
+        mut self,
         enable_logic_op: bool,
         logic_op: vk::LogicOp,
         blend_constants: [f32; 4],
@@ -1276,23 +1266,24 @@ impl<'a> PipelineBuilder<'a> {
         self.color_blend_info = vk::PipelineColorBlendStateCreateInfo::builder()
             .logic_op_enable(enable_logic_op)
             .logic_op(logic_op)
-            .blend_constants(blend_constants);
+            .blend_constants(blend_constants)
+            .build();
 
         self
     }
 
-    pub fn add_dynamic_state(self, dynamic_state: vk::DynamicState) -> Self {
+    pub fn add_dynamic_state(mut self, dynamic_state: vk::DynamicState) -> Self {
         self.dynamic_states.push(dynamic_state);
         self
     }
 
-    pub fn add_descriptor_set_layout(self, layout: vk::DescriptorSetLayout) -> Self {
+    pub fn add_descriptor_set_layout(mut self, layout: vk::DescriptorSetLayout) -> Self {
         self.descriptor_set_layouts.push(layout);
         self
     }
 
     pub fn add_push_constant_range(
-        self,
+        mut self,
         stages: vk::ShaderStageFlags,
         offset: u32,
         size: u32,
@@ -1300,108 +1291,95 @@ impl<'a> PipelineBuilder<'a> {
         let range = vk::PushConstantRange::builder()
             .stage_flags(stages)
             .offset(offset)
-            .size(size);
+            .size(size)
+            .build();
         self.push_constant_ranges.push(range);
         self
     }
 
-    pub fn cache(self) -> Self {
+    pub fn cache(mut self) -> Self {
         //I guess there are no settings?
-        self.pipeline_cache = Some(vk::PipelineCacheCreateInfo::builder());
+        self.pipeline_cache = Some(vk::PipelineCacheCreateInfo::builder().build());
         self
     }
 
-    pub fn render_pass(self, render_pass: vk::RenderPass, subpass: u32) -> Self {
+    pub fn render_pass(mut self, render_pass: vk::RenderPass, subpass: u32) -> Self {
         self.render_pass = render_pass;
         self.subpass = subpass;
         self
     }
 
-    pub fn base_pipeline(self, pipeline: vk::Pipeline, index: i32) -> Self {
+    pub fn base_pipeline(mut self, pipeline: vk::Pipeline, index: i32) -> Self {
         self.base_pipeline = pipeline;
         self.base_pipeline_index = index;
         self
     }
 
-    pub fn build_graphics(self) -> Pipeline {
-        //FUCKING HELL
+    pub fn build_graphics(mut self) -> Pipeline {
+        unsafe {
+            self.vertex_input.vertex_attribute_description_count = self.vertex_attributes.len() as u32;
+            self.vertex_input.p_vertex_attribute_descriptions = self.vertex_attributes.as_ptr();
+            self.vertex_input.vertex_binding_description_count = self.vertex_bindings.len() as u32;
+            self.vertex_input.p_vertex_binding_descriptions = self.vertex_bindings.as_ptr();
 
-        let attrs: Vec<_> = self.vertex_attributes.iter().map(|b| b.build()).collect();
-        let bindings: Vec<_> = self.vertex_bindings.iter().map(|b| b.build()).collect();
-        self.vertex_input
-            .vertex_attribute_descriptions(&attrs)
-            .vertex_binding_descriptions(&bindings);
+            self.color_blend_info.attachment_count = self.color_blend_attachments.len() as u32;
+            self.color_blend_info.p_attachments = self.color_blend_attachments.as_ptr();
+        }
 
-        let attachments: Vec<_> = self
-            .color_blend_attachments
-            .iter()
-            .map(|b| b.build())
-            .collect();
-        self.color_blend_info.attachments(&attachments);
-
-        let ranges: Vec<_> = self
-            .push_constant_ranges
-            .iter()
-            .map(|r| r.build())
-            .collect();
         let layout_info = vk::PipelineLayoutCreateInfo::builder()
-            .push_constant_ranges(&ranges)
+            .push_constant_ranges(&self.push_constant_ranges)
             .set_layouts(&self.descriptor_set_layouts);
+
         let layout = unsafe {
             self.device
                 .create_pipeline_layout(&layout_info, None)
                 .expect("Cannot create pipeline layout")
         };
 
-        let stages: Vec<_> = self.shader_stages.iter().map(|b| b.build()).collect();
+        let viewport_info = if self.viewports.is_empty() {
+            None
+        } else {
+             Some(vk::PipelineViewportStateCreateInfo::builder()
+                .viewport_count(self.viewports.len() as u32)
+                .viewports(&self.viewports)
+                .scissor_count(self.scissors.len() as u32)
+                .scissors(&self.scissors)
+                .build()
+            )
+        };
+
+        let dynamic_state = if self.dynamic_states.is_empty() {
+            None
+        } else {
+            Some(vk::PipelineDynamicStateCreateInfo::builder()
+                .dynamic_states(&self.dynamic_states)
+                .build()
+            )
+        };
 
         let info = vk::GraphicsPipelineCreateInfo::builder()
             .flags(self.flags)
-            .stages(&stages)
+            .stages(&self.shader_stages)
             .vertex_input_state(&self.vertex_input)
             .color_blend_state(&self.color_blend_info)
             .layout(layout)
             .render_pass(self.render_pass)
             .subpass(self.subpass)
             .base_pipeline_handle(self.base_pipeline)
-            .base_pipeline_index(self.base_pipeline_index);
+            .base_pipeline_index(self.base_pipeline_index)
+            .input_assembly_state(&self.input_assembly.unwrap_or_default())
+            .tessellation_state(&self.tesselation_info.unwrap_or_default())
+            .rasterization_state(&self.rasterizer_info.unwrap_or_default())
+            .multisample_state(&self.multisample_info.unwrap_or_default())
+            .depth_stencil_state(&self.depth_stencil_info.unwrap_or_default())
+            .viewport_state(&viewport_info.unwrap_or_default())
+            .dynamic_state(&dynamic_state.unwrap_or_default())
+            .build();
 
-        if let Some(assembly) = self.input_assembly {
-            info.input_assembly_state(&assembly);
-        }
-        if let Some(tesselation) = self.tesselation_info {
-            info.tessellation_state(&tesselation);
-        }
-        if let Some(raster) = self.rasterizer_info {
-            info.rasterization_state(&raster);
-        }
-        if let Some(msaa) = self.multisample_info {
-            info.multisample_state(&msaa);
-        }
-        if let Some(depth) = self.depth_stencil_info {
-            info.depth_stencil_state(&depth);
-        }
 
-        if !self.viewports.is_empty() {
-            let viewport_info = vk::PipelineViewportStateCreateInfo::builder()
-                .viewport_count(self.viewports.len() as u32)
-                .viewports(&self.viewports)
-                .scissor_count(self.scissors.len() as u32)
-                .scissors(&self.scissors);
+        let infos = [info];
 
-            info.viewport_state(&viewport_info);
-        }
-
-        if !self.dynamic_states.is_empty() {
-            let dyn_info =
-                vk::PipelineDynamicStateCreateInfo::builder().dynamic_states(&self.dynamic_states);
-
-            info.dynamic_state(&dyn_info);
-        }
-
-        let infos = [info.build()];
-
-        let cache = if let Some(cache_info) = self.pipeline_cache {
+        let cache = if let Some(cache_info) = &self.pipeline_cache {
             unsafe {
                 self.device
                     .create_pipeline_cache(&cache_info, None)
@@ -1426,15 +1404,9 @@ impl<'a> PipelineBuilder<'a> {
             bind_point: vk::PipelineBindPoint::GRAPHICS,
         }
     }
-    pub fn build_compute(self) -> Pipeline {
-        let ranges: Vec<_> = self
-            .push_constant_ranges
-            .iter()
-            .map(|r| r.build())
-            .collect();
-
+    pub fn build_compute(mut self) -> Pipeline {
         let pipeline_layout_info = vk::PipelineLayoutCreateInfo::builder()
-            .push_constant_ranges(&ranges)
+            .push_constant_ranges(&self.push_constant_ranges)
             .set_layouts(&self.descriptor_set_layouts);
 
         let layout = unsafe {
@@ -1443,7 +1415,7 @@ impl<'a> PipelineBuilder<'a> {
                 .expect("Cannot create pipeline layout!")
         };
 
-        let cache = if let Some(cache_info) = self.pipeline_cache {
+        let cache = if let Some(cache_info) = &self.pipeline_cache {
             unsafe {
                 self.device
                     .create_pipeline_cache(&cache_info, None)
@@ -1458,7 +1430,7 @@ impl<'a> PipelineBuilder<'a> {
             .base_pipeline_index(self.base_pipeline_index)
             .layout(layout)
             .flags(self.flags)
-            .stage(self.shader_stages[0].build());
+            .stage(self.shader_stages[0]);
 
         let infos = [pipeline_create_info.build()];
 
