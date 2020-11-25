@@ -1,16 +1,16 @@
 /*! File containing main engine loop */
 
 use winit::{
-    event::{Event, DeviceEvent, DeviceId, WindowEvent}, 
+    dpi::LogicalSize,
+    event::{DeviceEvent, DeviceId, Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
-    window::{WindowBuilder, Window},
-    dpi::{LogicalSize}
+    window::{Window, WindowBuilder},
 };
 
 use std::time::{Duration, Instant};
 
-use crate::renderer;
 use crate::gui;
+use crate::renderer;
 
 #[derive(Copy, Clone)]
 pub struct Arguments {
@@ -45,10 +45,11 @@ pub fn start_engine(arguments: Arguments) {
     //TODO: i really don't like that we are drawing GUI *here*, that, and state, should be elsewhere!!
     let mut gui_state = GuiState { demo_open: true };
     let mut gui = gui::create_gui(&window);
+    //TODO: imgui setup (fonts, themes etc.)
     let mut renderer = renderer::create_renderer(&window, &mut gui.context);
 
-    let one_over_sixty = Duration::from_secs_f64(1.0/60.0);
-    let frame_time_limit = Duration::from_secs_f64(1.0/arguments.fps as f64);
+    let one_over_sixty = Duration::from_secs_f64(1.0 / 60.0);
+    let frame_time_limit = Duration::from_secs_f64(1.0 / arguments.fps as f64);
 
     let mut fixed_instant = Instant::now();
     let mut render_instant = Instant::now();
@@ -112,10 +113,10 @@ fn raw_input(event: DeviceEvent, id: DeviceId) {
         //Added, Removed -> new device registered
         //Motion -> any motion (mouse, analog stick, wheel)
         //Button -> any button (controller, keyboard)
-        DeviceEvent::MouseMotion{delta} => {},
-        DeviceEvent::MouseWheel{delta} => {},
-        DeviceEvent::Key(key) => {},
-        _ => ()
+        DeviceEvent::MouseMotion { delta } => {}
+        DeviceEvent::MouseWheel { delta } => {}
+        DeviceEvent::Key(key) => {}
+        _ => (),
     }
 }
 
@@ -148,10 +149,19 @@ fn update_scene(delta_time: f64) {
 
 // 'a lifetime -> return value only lives as long as context lives.
 // as soon as context (in caller) goes out of scope, return value cannot be used anymore!
-fn update_gui<'a>(context: &'a mut imgui::Context, platform: &mut imgui_winit_support::WinitPlatform, 
-window: &Window, delta_time: f64, gui_state: &mut GuiState) -> imgui::Ui<'a> {
-    context.io_mut().update_delta_time(Duration::from_secs_f64(delta_time));
-    platform.prepare_frame(context.io_mut(), &window).expect("Couldn't prepare GUI frame!");
+fn update_gui<'a>(
+    context: &'a mut imgui::Context,
+    platform: &mut imgui_winit_support::WinitPlatform,
+    window: &Window,
+    delta_time: f64,
+    gui_state: &mut GuiState,
+) -> imgui::Ui<'a> {
+    context
+        .io_mut()
+        .update_delta_time(Duration::from_secs_f64(delta_time));
+    platform
+        .prepare_frame(context.io_mut(), &window)
+        .expect("Couldn't prepare GUI frame!");
     let ui_frame = context.frame();
 
     //DRAW UI
@@ -160,7 +170,6 @@ window: &Window, delta_time: f64, gui_state: &mut GuiState) -> imgui::Ui<'a> {
     platform.prepare_render(&ui_frame, &window);
     ui_frame
 }
-
 
 // use struct of arrays ECS ?
 // Entity == index

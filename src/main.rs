@@ -1,19 +1,18 @@
 /*! File containing application startup */
 
-extern crate winit;
 extern crate ash;
 extern crate ash_window;
-extern crate vk_mem;
-extern crate vk_sync;
 extern crate imgui;
 extern crate imgui_winit_support;
-extern crate imgui_rs_vulkan_renderer;
+extern crate vk_mem;
+extern crate vk_sync;
+extern crate winit;
 
 mod engine;
+mod gui;
 mod renderer;
 mod vulkan;
-mod gui;
-mod ecs;
+//mod ecs;
 
 //this should probably go somewhere else to be available globally
 enum ErrorCodes {
@@ -42,18 +41,15 @@ fn parse_u16(opt: &Option<String>) -> u16 {
     if let Some(string) = opt {
         if let Ok(int) = string.parse::<u16>() {
             int
-        }
-        else {
+        } else {
             usage_err("Argument was not a number!");
         }
-    }
-    else {
+    } else {
         usage_err("Argument missing!");
     }
 }
 
 fn main() {
-    
     let mut args = std::env::args();
 
     let mut arguments = engine::Arguments {
@@ -67,20 +63,20 @@ fn main() {
         match arg.as_str() {
             "-w" | "--width" => {
                 arguments.width = parse_u16(&args.next());
-            },
-            "-h" | "--height" => {  
+            }
+            "-h" | "--height" => {
                 arguments.height = parse_u16(&args.next());
-            },
+            }
             "--fps" => {
                 arguments.fps = parse_u16(&args.next());
-            },
+            }
             "--msaa" => {
                 arguments.msaa = parse_u16(&args.next());
-            },
+            }
             "--help" => {
                 usage();
-            },
-            _ => {},
+            }
+            _ => {}
         }
     }
 
