@@ -2,16 +2,16 @@
  *  WILL directly interface with Vulkan, nothing else will be supported
  */
 
-use std::cell::RefCell;
+
 
 use crate::{gui, vulkan};
 use ash::{
-    version::{DeviceV1_0, EntryV1_0, InstanceV1_0},
+    version::{DeviceV1_0, InstanceV1_0},
     vk,
 };
 use winit::window::Window;
 
-use vk_mem::Allocator;
+
 
 struct Vk {
     entry: ash::Entry,
@@ -238,7 +238,7 @@ pub fn draw_frame(renderer: &mut Renderer, gui_data: &imgui::DrawData) {
 
 fn record_commands(renderer: &mut Renderer, gui_data: &imgui::DrawData) {
     //must do borrows before closure, because "closure requires "
-    let imgui_renderer = &mut renderer.gui_renderer;
+    let _imgui_renderer = &mut renderer.gui_renderer;
     let vk = &renderer.vk;
 
     //should we enumerate instead of zipping and access with index? just use a for loop?

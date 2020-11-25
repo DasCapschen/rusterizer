@@ -3,15 +3,12 @@
 use ash::version::{EntryV1_0, InstanceV1_0};
 use ash::{
     version::DeviceV1_0,
-    vk::{self, QueueFamilyProperties},
+    vk::{self},
 };
 use std::{
     collections::HashSet,
     ffi::{CStr, CString},
     fs::File,
-    marker::PhantomData,
-    num::NonZeroU32,
-    path::PathBuf,
 };
 use winit::window::Window;
 
@@ -181,10 +178,10 @@ pub fn select_physical_device(
         let extensions_supported = requested_extension_names.is_subset(&extension_names);
 
         //check for certain features and properties that we wish to have!
-        let props = unsafe { instance.get_physical_device_properties(**device) };
+        let _props = unsafe { instance.get_physical_device_properties(**device) };
         let feats = unsafe { instance.get_physical_device_features(**device) };
 
-        let features_supported = (feats.sampler_anisotropy != 0);
+        let features_supported = feats.sampler_anisotropy != 0;
 
         //check for queue families
         let indices = find_queue_family_indices(instance, **device, surface_ext, surface);
@@ -1184,7 +1181,7 @@ impl<'a> PipelineBuilder<'a> {
         min_sample_shading: f32,
         enable_alpha_to_coverage: bool,
         enable_alpha_to_one: bool,
-        sample_mask: Option<vk::SampleMask>,
+        _sample_mask: Option<vk::SampleMask>,
     ) -> Self {
         let msaa = vk::PipelineMultisampleStateCreateInfo::builder()
             .rasterization_samples(samples)
@@ -1410,7 +1407,7 @@ impl<'a> PipelineBuilder<'a> {
             bind_point: vk::PipelineBindPoint::GRAPHICS,
         }
     }
-    pub fn build_compute(mut self) -> Pipeline {
+    pub fn build_compute(self) -> Pipeline {
         let pipeline_layout_info = vk::PipelineLayoutCreateInfo::builder()
             .push_constant_ranges(&self.push_constant_ranges)
             .set_layouts(&self.descriptor_set_layouts);

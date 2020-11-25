@@ -51,7 +51,7 @@ pub fn start_engine(arguments: Arguments) {
     let one_over_sixty = Duration::from_secs_f64(1.0 / 60.0);
     let frame_time_limit = Duration::from_secs_f64(1.0 / arguments.fps as f64);
 
-    let mut fixed_instant = Instant::now();
+    let fixed_instant = Instant::now();
     let mut render_instant = Instant::now();
 
     event_loop.run(move |event, _, control_flow| {
@@ -108,14 +108,14 @@ pub fn start_engine(arguments: Arguments) {
     });
 }
 
-fn raw_input(event: DeviceEvent, id: DeviceId) {
+fn raw_input(event: DeviceEvent, _id: DeviceId) {
     match event {
         //Added, Removed -> new device registered
         //Motion -> any motion (mouse, analog stick, wheel)
         //Button -> any button (controller, keyboard)
-        DeviceEvent::MouseMotion { delta } => {}
-        DeviceEvent::MouseWheel { delta } => {}
-        DeviceEvent::Key(key) => {}
+        DeviceEvent::MouseMotion { delta: _ } => {}
+        DeviceEvent::MouseWheel { delta: _ } => {}
+        DeviceEvent::Key(_key) => {}
         _ => (),
     }
 }
@@ -131,7 +131,7 @@ fn handle_events() {
     // maybe pass a closure to action's constructor???
 }
 
-fn fixed_update_scene(delta_time: f64) {
+fn fixed_update_scene(_delta_time: f64) {
     // for object in fixed_update_objects
     //     object.fixed_update(delta_time)
 
@@ -139,7 +139,7 @@ fn fixed_update_scene(delta_time: f64) {
     // or maybe implement an ECS instead?
 }
 
-fn update_scene(delta_time: f64) {
+fn update_scene(_delta_time: f64) {
     // for object in update_objects
     //     object.update(delta_time)
 

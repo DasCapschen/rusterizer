@@ -1,11 +1,11 @@
 /*! File containing logic for rendering immediate mode GUI */
 
-use std::{mem::size_of, num::NonZeroU32};
+use std::{mem::size_of};
 
-use crate::renderer;
+
 use crate::vulkan;
 use ash::{
-    version::{DeviceV1_0, EntryV1_0, InstanceV1_0},
+    version::{DeviceV1_0},
     vk,
 };
 use imgui::Context;
@@ -298,4 +298,4 @@ pub fn create_renderer(
     }
 }
 
-pub fn record_draw_commands(commandbuffer: vk::CommandBuffer, gui_data: &imgui::DrawData) {}
+pub fn record_draw_commands(_commandbuffer: vk::CommandBuffer, _gui_data: &imgui::DrawData) {}
