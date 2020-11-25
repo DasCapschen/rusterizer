@@ -46,7 +46,7 @@ pub fn start_engine(arguments: Arguments) {
     let mut gui_state = GuiState { demo_open: true };
     let mut gui = gui::create_gui(&window);
     //TODO: imgui setup (fonts, themes etc.)
-    let mut renderer = renderer::create_renderer(&window, &mut gui.context);
+    let mut renderer = renderer::create_renderer(&window, &mut gui);
 
     let one_over_sixty = Duration::from_secs_f64(1.0 / 60.0);
     let frame_time_limit = Duration::from_secs_f64(1.0 / arguments.fps as f64);

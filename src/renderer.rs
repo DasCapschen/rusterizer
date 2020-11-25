@@ -95,7 +95,7 @@ pub struct Renderer {
     gui_renderer: gui::GuiRenderer,
 }
 
-pub fn create_renderer(window: &Window, gui: &crate::gui::Gui) -> Renderer {
+pub fn create_renderer(window: &Window, gui: &mut crate::gui::Gui) -> Renderer {
     //vulkan loader
     let entry = ash::Entry::new().expect("Failed to load Vulkan!");
 
@@ -113,8 +113,8 @@ pub fn create_renderer(window: &Window, gui: &crate::gui::Gui) -> Renderer {
     //memory allocator (vma)
     let allocator_info = vk_mem::AllocatorCreateInfo {
         physical_device: pdevice,
-        device: ldevice,
-        instance: instance,
+        device: ldevice.clone(),
+        instance: instance.clone(),
         ..Default::default()
     };
 
@@ -184,12 +184,12 @@ pub fn create_renderer(window: &Window, gui: &crate::gui::Gui) -> Renderer {
     //let imgui_renderer = imgui_rs_vulkan_renderer::Renderer::new(&vk, 1, render_pass, gui_context).expect("Cannot create imgui renderer");
 
     let gui_renderer = gui::create_renderer(
-        &ldevice,
+        &vk.device,
         command_pool,
-        vulkan::get_graphics_queue(&ldevice, &q_families),
+        vulkan::get_graphics_queue(&vk.device, &vk.queue_families),
         render_pass,
         0,
-        &allocator,
+        &vk.allocator,
         gui,
     );
 
