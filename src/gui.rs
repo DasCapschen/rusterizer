@@ -53,7 +53,6 @@ pub fn create_renderer(
     allocator: &vk_mem::Allocator,
     gui: &mut Gui,
 ) -> GuiRenderer {
-
     let width = gui.context.io().display_size[0];
     let height = gui.context.io().display_size[1];
 
@@ -257,14 +256,8 @@ pub fn create_renderer(
         .add_dynamic_state(vk::DynamicState::VIEWPORT)
         .add_dynamic_state(vk::DynamicState::SCISSOR)
         .multisample(vk::SampleCountFlags::TYPE_1, false, 0.0, false, false, None)
-        .add_shader_stage(
-            "res/imgui.vert",
-            vk::ShaderStageFlags::VERTEX,
-        )
-        .add_shader_stage(
-            "res/imgui.frag",
-            vk::ShaderStageFlags::FRAGMENT,
-        )
+        .add_shader_stage("res/imgui.vert", vk::ShaderStageFlags::VERTEX)
+        .add_shader_stage("res/imgui.frag", vk::ShaderStageFlags::FRAGMENT)
         .add_vertex_binding(
             0,
             size_of::<imgui::sys::ImDrawVert>() as u32,

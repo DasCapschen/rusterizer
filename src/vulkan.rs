@@ -985,7 +985,7 @@ pub struct PipelineBuilder<'a> {
     depth_stencil_info: Option<vk::PipelineDepthStencilStateCreateInfo>,
     pipeline_cache: Option<vk::PipelineCacheCreateInfo>,
 
-    shader_entry_point: CString
+    shader_entry_point: CString,
 }
 impl<'a> Drop for PipelineBuilder<'a> {
     fn drop(&mut self) {
@@ -1020,7 +1020,7 @@ impl<'a> PipelineBuilder<'a> {
             multisample_mask: None,
             depth_stencil_info: None,
             pipeline_cache: None,
-            shader_entry_point: CString::new("main").expect("ficken")
+            shader_entry_point: CString::new("main").expect("ficken"),
         }
     }
 
@@ -1029,10 +1029,7 @@ impl<'a> PipelineBuilder<'a> {
         self
     }
 
-    pub fn add_shader_stage(mut self,
-        file: &str,
-        stage: vk::ShaderStageFlags
-    ) -> Self {
+    pub fn add_shader_stage(mut self, file: &str, stage: vk::ShaderStageFlags) -> Self {
         let mut shader_file = File::open(file).expect("Cannot open shader file!");
         let code = ash::util::read_spv(&mut shader_file).expect("Cannot read SPIR-V!");
 
@@ -1056,7 +1053,8 @@ impl<'a> PipelineBuilder<'a> {
         self
     }
 
-    pub fn add_vertex_binding(mut self,
+    pub fn add_vertex_binding(
+        mut self,
         binding: u32,
         stride: u32,
         input_rate: vk::VertexInputRate,
@@ -1071,7 +1069,8 @@ impl<'a> PipelineBuilder<'a> {
         self
     }
 
-    pub fn add_vertex_attribute(mut self,
+    pub fn add_vertex_attribute(
+        mut self,
         location: u32,
         binding: u32,
         format: vk::Format,
@@ -1088,12 +1087,16 @@ impl<'a> PipelineBuilder<'a> {
         self
     }
 
-    pub fn input_assembly(mut self, topology: vk::PrimitiveTopology, primitive_restart: bool) -> Self {
+    pub fn input_assembly(
+        mut self,
+        topology: vk::PrimitiveTopology,
+        primitive_restart: bool,
+    ) -> Self {
         self.input_assembly = Some(
             vk::PipelineInputAssemblyStateCreateInfo::builder()
                 .topology(topology)
                 .primitive_restart_enable(primitive_restart)
-                .build()
+                .build(),
         );
 
         self
@@ -1103,13 +1106,14 @@ impl<'a> PipelineBuilder<'a> {
         self.tesselation_info = Some(
             vk::PipelineTessellationStateCreateInfo::builder()
                 .patch_control_points(patch_control_points)
-                .build()
+                .build(),
         );
 
         self
     }
 
-    pub fn add_viewport(mut self,
+    pub fn add_viewport(
+        mut self,
         x: f32,
         y: f32,
         width: f32,
@@ -1167,7 +1171,7 @@ impl<'a> PipelineBuilder<'a> {
                 .front_face(front_face)
                 .cull_mode(cull_mode)
                 .line_width(line_width)
-                .build()
+                .build(),
         );
 
         self
@@ -1225,7 +1229,7 @@ impl<'a> PipelineBuilder<'a> {
                 .depth_compare_op(depth_compare_op)
                 .front(stencil_front)
                 .back(stencil_back)
-                .build()
+                .build(),
         );
 
         self
@@ -1317,7 +1321,8 @@ impl<'a> PipelineBuilder<'a> {
 
     pub fn build_graphics(mut self) -> Pipeline {
         unsafe {
-            self.vertex_input.vertex_attribute_description_count = self.vertex_attributes.len() as u32;
+            self.vertex_input.vertex_attribute_description_count =
+                self.vertex_attributes.len() as u32;
             self.vertex_input.p_vertex_attribute_descriptions = self.vertex_attributes.as_ptr();
             self.vertex_input.vertex_binding_description_count = self.vertex_bindings.len() as u32;
             self.vertex_input.p_vertex_binding_descriptions = self.vertex_bindings.as_ptr();
@@ -1339,21 +1344,23 @@ impl<'a> PipelineBuilder<'a> {
         let viewport_info = if self.viewports.is_empty() {
             None
         } else {
-             Some(vk::PipelineViewportStateCreateInfo::builder()
-                .viewport_count(self.viewports.len() as u32)
-                .viewports(&self.viewports)
-                .scissor_count(self.scissors.len() as u32)
-                .scissors(&self.scissors)
-                .build()
+            Some(
+                vk::PipelineViewportStateCreateInfo::builder()
+                    .viewport_count(self.viewports.len() as u32)
+                    .viewports(&self.viewports)
+                    .scissor_count(self.scissors.len() as u32)
+                    .scissors(&self.scissors)
+                    .build(),
             )
         };
 
         let dynamic_state = if self.dynamic_states.is_empty() {
             None
         } else {
-            Some(vk::PipelineDynamicStateCreateInfo::builder()
-                .dynamic_states(&self.dynamic_states)
-                .build()
+            Some(
+                vk::PipelineDynamicStateCreateInfo::builder()
+                    .dynamic_states(&self.dynamic_states)
+                    .build(),
             )
         };
 
@@ -1375,7 +1382,6 @@ impl<'a> PipelineBuilder<'a> {
             .viewport_state(&viewport_info.unwrap_or_default())
             .dynamic_state(&dynamic_state.unwrap_or_default())
             .build();
-
 
         let infos = [info];
 
