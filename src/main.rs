@@ -1,5 +1,7 @@
 /*! File containing application startup */
 
+// VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation
+
 extern crate ash;
 extern crate ash_window;
 extern crate imgui;

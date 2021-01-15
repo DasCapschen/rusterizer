@@ -49,7 +49,7 @@ pub struct AllocatedImage {
     pub usage: vk::ImageUsageFlags,
 }
 impl AllocatedImage {
-    pub fn destroy(self, allocator: &vk_mem::Allocator) {
+    pub fn destroy(&mut self, allocator: &vk_mem::Allocator) {
         allocator.destroy_image(self.image, &self.allocation);
     }
 }
@@ -64,7 +64,7 @@ pub struct AllocatedBuffer {
     pub size: u64,
 }
 impl AllocatedBuffer {
-    fn destroy(self, allocator: &vk_mem::Allocator) {
+    pub fn destroy(&mut self, allocator: &vk_mem::Allocator) {
         allocator.destroy_buffer(self.buffer, &self.allocation);
     }
 }
@@ -152,7 +152,7 @@ pub fn select_physical_device(
     instance: &ash::Instance,
     surface_ext: &ash::extensions::khr::Surface,
     surface: vk::SurfaceKHR,
-) -> vk::PhysicalDevice {
+) -> ash::vk::PhysicalDevice {
     let devices = unsafe {
         instance
             .enumerate_physical_devices()
@@ -945,6 +945,13 @@ impl Pipeline {
     pub fn builder(device: &'_ ash::Device) -> PipelineBuilder<'_> {
         PipelineBuilder::new(device)
     }
+    pub fn destroy(&mut self, device: &ash::Device) {
+        unsafe {
+            device.destroy_pipeline(self.pipeline, None);
+            device.destroy_pipeline_cache(self.cache, None);
+            device.destroy_pipeline_layout(self.layout, None);
+        }
+    }
 }
 
 pub struct PipelineBuilder<'a> {
@@ -978,7 +985,7 @@ pub struct PipelineBuilder<'a> {
     tesselation_info: Option<vk::PipelineTessellationStateCreateInfo>,
     rasterizer_info: Option<vk::PipelineRasterizationStateCreateInfo>,
     multisample_info: Option<vk::PipelineMultisampleStateCreateInfo>,
-    multisample_mask: Option<vk::SampleMask>,
+    multisample_mask: Vec<vk::SampleMask>,
     depth_stencil_info: Option<vk::PipelineDepthStencilStateCreateInfo>,
     pipeline_cache: Option<vk::PipelineCacheCreateInfo>,
 
@@ -986,7 +993,11 @@ pub struct PipelineBuilder<'a> {
 }
 impl<'a> Drop for PipelineBuilder<'a> {
     fn drop(&mut self) {
-        todo!()
+        unsafe {
+            for stage in &self.shader_stages {
+                self.device.destroy_shader_module(stage.module, None)
+            }
+        }
     }
 }
 impl<'a> PipelineBuilder<'a> {
@@ -1014,7 +1025,7 @@ impl<'a> PipelineBuilder<'a> {
             tesselation_info: None,
             rasterizer_info: None,
             multisample_info: None,
-            multisample_mask: None,
+            multisample_mask: vec![],
             depth_stencil_info: None,
             pipeline_cache: None,
             shader_entry_point: CString::new("main").expect("ficken"),
@@ -1181,9 +1192,9 @@ impl<'a> PipelineBuilder<'a> {
         min_sample_shading: f32,
         enable_alpha_to_coverage: bool,
         enable_alpha_to_one: bool,
-        _sample_mask: Option<vk::SampleMask>,
+        sample_mask: Option<vk::SampleMask>,
     ) -> Self {
-        let msaa = vk::PipelineMultisampleStateCreateInfo::builder()
+        let mut msaa = vk::PipelineMultisampleStateCreateInfo::builder()
             .rasterization_samples(samples)
             .sample_shading_enable(enable_sample_shading)
             .min_sample_shading(min_sample_shading)
@@ -1191,15 +1202,12 @@ impl<'a> PipelineBuilder<'a> {
             .alpha_to_one_enable(enable_alpha_to_one)
             .build();
 
-        //isn't this gonna create lifetime problems? YES
-        //if let Some(mask) = sample_mask {
-        //    let masks = [mask];
-        //    builder = builder.sample_mask(&masks);
-        //}
+        if let Some(mask) = sample_mask {
+            self.multisample_mask.push(mask);
+            msaa.p_sample_mask = self.multisample_mask.as_ptr();
+        }
 
-        self.multisample_mask = None;
         self.multisample_info = Some(msaa);
-
         self
     }
 
@@ -1318,8 +1326,7 @@ impl<'a> PipelineBuilder<'a> {
 
     pub fn build_graphics(mut self) -> Pipeline {
         unsafe {
-            self.vertex_input.vertex_attribute_description_count =
-                self.vertex_attributes.len() as u32;
+            self.vertex_input.vertex_attribute_description_count = self.vertex_attributes.len() as u32;
             self.vertex_input.p_vertex_attribute_descriptions = self.vertex_attributes.as_ptr();
             self.vertex_input.vertex_binding_description_count = self.vertex_bindings.len() as u32;
             self.vertex_input.p_vertex_binding_descriptions = self.vertex_bindings.as_ptr();

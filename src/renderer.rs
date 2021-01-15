@@ -46,11 +46,14 @@ impl Drop for Vk {
     fn drop(&mut self) {
         //destroy things in opposite order of creation!
         unsafe {
+            self.device.device_wait_idle().expect("Cannot wait for device idle");
+
             //destroy pipeline
 
             //destroy pipeline layout
 
             //destroy command pool
+            self.device.free_command_buffers(self.command_pool, &self.command_buffers);
             self.device.destroy_command_pool(self.command_pool, None);
 
             //destroy framebuffers
@@ -76,6 +79,8 @@ impl Drop for Vk {
             self.swapchain_loader
                 .destroy_swapchain(self.swapchain, None);
 
+            self.allocator.destroy();
+
             //destroy device
             self.device.destroy_device(None);
 
@@ -93,6 +98,14 @@ impl Drop for Vk {
 pub struct Renderer {
     vk: Vk,
     gui_renderer: gui::GuiRenderer,
+}
+impl Drop for Renderer {
+    fn drop(&mut self) {
+        unsafe {
+            self.vk.device.device_wait_idle().expect("Cannot wait for device idle");
+        }
+        self.gui_renderer.destroy(&self.vk.device, &self.vk.allocator);
+    }
 }
 
 pub fn create_renderer(window: &Window, gui: &mut crate::gui::Gui) -> Renderer {
@@ -112,7 +125,7 @@ pub fn create_renderer(window: &Window, gui: &mut crate::gui::Gui) -> Renderer {
 
     //memory allocator (vma)
     let allocator_info = vk_mem::AllocatorCreateInfo {
-        physical_device: pdevice,
+        physical_device: pdevice.clone(),
         device: ldevice.clone(),
         instance: instance.clone(),
         ..Default::default()
@@ -238,15 +251,13 @@ pub fn draw_frame(renderer: &mut Renderer, gui_data: &imgui::DrawData) {
 
 fn record_commands(renderer: &mut Renderer, gui_data: &imgui::DrawData) {
     //must do borrows before closure, because "closure requires "
-    let _imgui_renderer = &mut renderer.gui_renderer;
+    let imgui_renderer = &mut renderer.gui_renderer;
     let vk = &renderer.vk;
 
     //should we enumerate instead of zipping and access with index? just use a for loop?
-    renderer
-        .vk
-        .command_buffers
+    vk.command_buffers
         .iter()
-        .zip(renderer.vk.framebuffers.iter())
+        .zip(vk.framebuffers.iter())
         .for_each(|(cmdbuf, framebuf)| {
             //don't need any flags or inheritance yet
             let cmd_info = vk::CommandBufferBeginInfo::builder();
@@ -282,9 +293,13 @@ fn record_commands(renderer: &mut Renderer, gui_data: &imgui::DrawData) {
                 )
             }
 
-            //TODO: draw something
-            gui::record_draw_commands(*cmdbuf, gui_data);
-            //imgui_renderer.cmd_draw(vk, *cmdbuf, gui_data).expect("Cannot record imgui draw commands!");
+            gui::record_draw_commands(
+                imgui_renderer, 
+                &vk.allocator, 
+                &vk.device, 
+                *cmdbuf, 
+                gui_data,
+            );
 
             unsafe { vk.device.cmd_end_render_pass(*cmdbuf) }
             unsafe {
