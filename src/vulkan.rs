@@ -1326,7 +1326,8 @@ impl<'a> PipelineBuilder<'a> {
 
     pub fn build_graphics(mut self) -> Pipeline {
         unsafe {
-            self.vertex_input.vertex_attribute_description_count = self.vertex_attributes.len() as u32;
+            self.vertex_input.vertex_attribute_description_count =
+                self.vertex_attributes.len() as u32;
             self.vertex_input.p_vertex_attribute_descriptions = self.vertex_attributes.as_ptr();
             self.vertex_input.vertex_binding_description_count = self.vertex_bindings.len() as u32;
             self.vertex_input.p_vertex_binding_descriptions = self.vertex_bindings.as_ptr();

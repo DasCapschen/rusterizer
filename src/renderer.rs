@@ -2,16 +2,12 @@
  *  WILL directly interface with Vulkan, nothing else will be supported
  */
 
-
-
 use crate::{gui, vulkan};
 use ash::{
     version::{DeviceV1_0, InstanceV1_0},
     vk,
 };
 use winit::window::Window;
-
-
 
 struct Vk {
     entry: ash::Entry,
@@ -46,14 +42,17 @@ impl Drop for Vk {
     fn drop(&mut self) {
         //destroy things in opposite order of creation!
         unsafe {
-            self.device.device_wait_idle().expect("Cannot wait for device idle");
+            self.device
+                .device_wait_idle()
+                .expect("Cannot wait for device idle");
 
             //destroy pipeline
 
             //destroy pipeline layout
 
             //destroy command pool
-            self.device.free_command_buffers(self.command_pool, &self.command_buffers);
+            self.device
+                .free_command_buffers(self.command_pool, &self.command_buffers);
             self.device.destroy_command_pool(self.command_pool, None);
 
             //destroy framebuffers
@@ -102,9 +101,13 @@ pub struct Renderer {
 impl Drop for Renderer {
     fn drop(&mut self) {
         unsafe {
-            self.vk.device.device_wait_idle().expect("Cannot wait for device idle");
+            self.vk
+                .device
+                .device_wait_idle()
+                .expect("Cannot wait for device idle");
         }
-        self.gui_renderer.destroy(&self.vk.device, &self.vk.allocator);
+        self.gui_renderer
+            .destroy(&self.vk.device, &self.vk.allocator);
     }
 }
 
@@ -293,13 +296,7 @@ fn record_commands(renderer: &mut Renderer, gui_data: &imgui::DrawData) {
                 )
             }
 
-            gui::record_draw_commands(
-                imgui_renderer, 
-                &vk.allocator, 
-                &vk.device, 
-                *cmdbuf, 
-                gui_data,
-            );
+            gui::record_draw_commands(imgui_renderer, &vk.allocator, &vk.device, *cmdbuf, gui_data);
 
             unsafe { vk.device.cmd_end_render_pass(*cmdbuf) }
             unsafe {
