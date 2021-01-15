@@ -1681,8 +1681,7 @@ checksum = "b5a972e5669d67ba988ce3dc826706fb0a8b01471c088cb0b6110b805cc36aed"
 [[package]]
 name = "vk-mem"
 version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7c89db58563ea4fb34bd0394eb977c9c7ff7d16bf605f4eb945db7cab8c0c16f"
+source = "git+https://github.com/gwihlidal/vk-mem-rs.git#5395612757d7f3b785f7607f955b19a51cf4dfb9"
 dependencies = [
  "ash 0.31.0",
  "bitflags",
