@@ -8,13 +8,18 @@ use ash::{
     version::{DeviceV1_0},
     vk,
 };
-use imgui::Context;
+use imgui::{Context, DrawIdx, DrawVert};
 use imgui_winit_support::{HiDpiMode, WinitPlatform};
 
 pub struct Gui {
     pub context: Context,
     pub platform: WinitPlatform,
 }
+
+//TODO: somehow implement drop for everything!
+//in theory we can just have everything have a 'a lifetime of the device
+//and a reference to it
+//since the device will always drop last.
 
 pub struct GuiRenderer {
     pipeline: vulkan::Pipeline,
@@ -30,10 +35,31 @@ pub struct GuiRenderer {
     index_count: i32,
     push_constants: ImguiPushConstants,
 }
+impl GuiRenderer {
+    pub fn destroy(&mut self, device: &ash::Device, allocator: &vk_mem::Allocator) {
+        unsafe {
+            device.destroy_image_view(self.font_image_view, None);
+            device.destroy_sampler(self.font_sampler, None);
+            device.destroy_descriptor_pool(self.descriptor_pool, None);
+            device.destroy_descriptor_set_layout(self.descriptor_set_layout, None);
+        }
+
+        self.pipeline.destroy(device);
+
+        self.font_image.destroy(allocator);
+
+        if self.vertex_buffer.is_some() {
+            self.vertex_buffer.as_mut().unwrap().destroy(allocator);
+        }
+        if self.index_buffer.is_some() {
+            self.index_buffer.as_mut().unwrap().destroy(allocator);
+        }
+    }
+}
 
 struct ImguiPushConstants {
-    scale: imgui::sys::ImVec2,
-    translate: imgui::sys::ImVec2,
+    scale: [f32;2],
+    translate: [f32;2],
 }
 
 pub fn create_gui(window: &winit::window::Window) -> Gui {
@@ -85,7 +111,7 @@ pub fn create_renderer(
         0,
     );
 
-    let staging_buffer = vulkan::create_buffer(
+    let mut staging_buffer = vulkan::create_buffer(
         allocator,
         atlas.data.len() as u64,
         vk::SharingMode::EXCLUSIVE,
@@ -99,9 +125,7 @@ pub fn create_renderer(
     unsafe {
         raw_memory.copy_from(atlas.data.as_ptr(), atlas.data.len());
     }
-    allocator
-        .unmap_memory(&staging_buffer.allocation)
-        .expect("Failed to unmap buffer!");
+    allocator.unmap_memory(&staging_buffer.allocation);
 
     //create one-time command buffer
     let cmdbuf = vulkan::create_command_buffers(device, pool, vk::CommandBufferLevel::PRIMARY, 1);
@@ -110,7 +134,7 @@ pub fn create_renderer(
 
     //record command buffer
     unsafe {
-        device.begin_command_buffer(cmdbuf[0], &begin_info);
+        device.begin_command_buffer(cmdbuf[0], &begin_info).expect("Cannot begin command buffer!");
 
         font_image = vulkan::set_image_layout(
             device,
@@ -140,17 +164,19 @@ pub fn create_renderer(
             vk::PipelineStageFlags::FRAGMENT_SHADER,
         );
 
-        device.end_command_buffer(cmdbuf[0]);
+        device.end_command_buffer(cmdbuf[0]).expect("Cannot end command buffer!");
     }
 
     //submit command buffer
     let submit_info = vk::SubmitInfo::builder().command_buffers(&cmdbuf).build();
     let submits = [submit_info];
     unsafe {
-        device.queue_submit(queue, &submits, vk::Fence::null());
-        device.queue_wait_idle(queue);
+        device.queue_submit(queue, &submits, vk::Fence::null()).expect("Queue submit failed!");
+        device.queue_wait_idle(queue).expect("Failed to wait for queue");
         device.free_command_buffers(pool, &cmdbuf);
         drop(cmdbuf);
+
+        staging_buffer.destroy(allocator);
     }
 
     //Create Font Texture Sampler
@@ -256,11 +282,11 @@ pub fn create_renderer(
         .add_dynamic_state(vk::DynamicState::VIEWPORT)
         .add_dynamic_state(vk::DynamicState::SCISSOR)
         .multisample(vk::SampleCountFlags::TYPE_1, false, 0.0, false, false, None)
-        .add_shader_stage("res/imgui.vert", vk::ShaderStageFlags::VERTEX)
-        .add_shader_stage("res/imgui.frag", vk::ShaderStageFlags::FRAGMENT)
+        .add_shader_stage("res/imgui.vert.spv", vk::ShaderStageFlags::VERTEX)
+        .add_shader_stage("res/imgui.frag.spv", vk::ShaderStageFlags::FRAGMENT)
         .add_vertex_binding(
             0,
-            size_of::<imgui::sys::ImDrawVert>() as u32,
+            size_of::<DrawVert>() as u32,
             vk::VertexInputRate::VERTEX,
         )
         .add_vertex_attribute(0, 0, vk::Format::R32G32_SFLOAT, 0)
@@ -268,13 +294,13 @@ pub fn create_renderer(
             1,
             0,
             vk::Format::R32G32_SFLOAT,
-            size_of::<imgui::sys::ImVec2>() as u32,
+            size_of::<[f32;2]>() as u32,
         )
         .add_vertex_attribute(
             2,
             0,
             vk::Format::R8G8B8A8_UNORM,
-            2 * size_of::<imgui::sys::ImVec2>() as u32,
+            2 * size_of::<[f32;2]>() as u32,
         )
         .render_pass(render_pass, subpass)
         .build_graphics();
@@ -292,10 +318,185 @@ pub fn create_renderer(
         vertex_count: 0,
         index_count: 0,
         push_constants: ImguiPushConstants {
-            scale: imgui::sys::ImVec2::new(1.0, 1.0),
-            translate: imgui::sys::ImVec2::new(-1.0, -1.0),
+            scale: [1.0, 1.0],
+            translate: [-1.0, -1.0],
         },
     }
 }
 
-pub fn record_draw_commands(_commandbuffer: vk::CommandBuffer, _gui_data: &imgui::DrawData) {}
+pub fn record_draw_commands(
+    renderer: &mut GuiRenderer, 
+    allocator: &vk_mem::Allocator,
+    device: &ash::Device,
+    commandbuffer: vk::CommandBuffer, 
+    draw_data: &imgui::DrawData
+) {
+    // 1) Update buffers
+    // 2) Draw Frame
+    
+    // UPDATE BUFFERS
+    let vcount = draw_data.total_vtx_count;
+    let icount = draw_data.total_idx_count;
+    let vbufsize = vcount as u64 * size_of::<DrawVert>() as u64;
+    let ibufsize = icount as u64 * size_of::<DrawIdx>() as u64;
+
+    if vbufsize == 0 || ibufsize == 0 {
+        return;
+    }
+
+    if renderer.vertex_buffer.is_none() || renderer.vertex_count != vcount {
+        if let Some(buf) = &mut renderer.vertex_buffer {
+            buf.destroy(&allocator);
+        }
+
+        renderer.vertex_buffer = Some(vulkan::create_buffer(allocator, vbufsize, vk::SharingMode::EXCLUSIVE, vk::BufferUsageFlags::VERTEX_BUFFER, vk::MemoryPropertyFlags::HOST_VISIBLE));
+        renderer.vertex_count = vcount;
+    }
+
+    if renderer.index_buffer.is_none() || renderer.index_count != icount {
+        if let Some(buf) = &mut renderer.index_buffer {
+            buf.destroy(&allocator);
+        }
+
+        renderer.index_buffer = Some(vulkan::create_buffer(allocator, ibufsize, vk::SharingMode::EXCLUSIVE, vk::BufferUsageFlags::INDEX_BUFFER, vk::MemoryPropertyFlags::HOST_VISIBLE));
+        renderer.index_count = icount;
+    }
+
+    let mut vertex_dst = allocator.map_memory(&renderer.vertex_buffer.as_ref().unwrap().allocation).expect("Failed to map vertex buffer!") as (*mut DrawVert);
+    let mut index_dst = allocator.map_memory(&renderer.index_buffer.as_ref().unwrap().allocation).expect("Failed to map index buffer!") as (*mut DrawIdx);
+
+    //god i hope this works as expected...
+    draw_data.draw_lists().for_each(|drawlist| {
+        unsafe {
+            //copy a bit of data
+            vertex_dst.copy_from(drawlist.vtx_buffer().as_ptr(), drawlist.vtx_buffer().len() as usize);
+            index_dst.copy_from(drawlist.idx_buffer().as_ptr(), drawlist.idx_buffer().len() as usize);
+            //step ahead so we don't overwrite next iteration
+            vertex_dst = vertex_dst.offset(drawlist.vtx_buffer().len() as isize);
+            index_dst = index_dst.offset(drawlist.idx_buffer().len() as isize);
+        }
+    });
+
+    allocator.flush_allocation(&renderer.vertex_buffer.as_ref().unwrap().allocation, 0, vk::WHOLE_SIZE as usize);
+    allocator.flush_allocation(&renderer.index_buffer.as_ref().unwrap().allocation, 0, vk::WHOLE_SIZE as usize);
+    allocator.unmap_memory(&renderer.vertex_buffer.as_ref().unwrap().allocation);
+    allocator.unmap_memory(&renderer.index_buffer.as_ref().unwrap().allocation);
+
+
+    //DRAW FRAME
+    let desc_sets = [renderer.descriptor_set];
+    let dyn_offsets = [];
+
+    let width = draw_data.framebuffer_scale[0] * draw_data.display_size[0];
+    let height = draw_data.framebuffer_scale[1] * draw_data.display_size[1];
+
+    let viewports = [
+        vk::Viewport::builder()
+        .width(width)
+        .height(height)
+        .x(0.0)
+        .y(0.0)
+        .min_depth(0.0)
+        .max_depth(1.0)
+        .build()
+    ];
+
+    renderer.push_constants.scale = [ 2.0 / width, 2.0 / height ];
+    renderer.push_constants.translate = [ -1.0, -1.0 ];
+
+    unsafe { 
+        device.cmd_bind_descriptor_sets(
+            commandbuffer, 
+            renderer.pipeline.bind_point, 
+            renderer.pipeline.layout, 
+            0, &desc_sets,
+            &dyn_offsets);
+
+        device.cmd_bind_pipeline(
+            commandbuffer, 
+            renderer.pipeline.bind_point, 
+            renderer.pipeline.pipeline);
+
+        device.cmd_set_viewport(commandbuffer, 
+            0, &viewports);
+
+        //wow... really? seems unsafe xD
+        let push_const_slice = std::slice::from_raw_parts(
+            (&renderer.push_constants as *const ImguiPushConstants) as *const u8,
+            size_of::<ImguiPushConstants>()
+        );
+
+        device.cmd_push_constants(commandbuffer, 
+            renderer.pipeline.layout, 
+            vk::ShaderStageFlags::VERTEX, 
+            0, 
+            push_const_slice
+        );
+
+        let vbuffers = [renderer.vertex_buffer.as_ref().unwrap().buffer];
+        let offsets = [0];
+        device.cmd_bind_vertex_buffers(
+            commandbuffer, 
+            0, 
+            &vbuffers, 
+            &offsets);
+        device.cmd_bind_index_buffer(
+            commandbuffer, 
+            renderer.index_buffer.as_ref().unwrap().buffer, 
+            0, 
+            vk::IndexType::UINT16);
+            //pub type DrawIdx = sys::ImDrawIdx;
+            //pub type ImDrawIdx = ::std::os::raw::c_ushort;
+            //pub type c_ushort = u16;
+    }
+
+    let mut vertex_offset = 0;
+    let mut index_offset = 0;
+
+    draw_data.draw_lists().for_each(|draw_list| {
+        draw_list.commands().for_each(|command| {
+            match command {
+                imgui::DrawCmd::Elements {
+                    count, cmd_params
+                } => {
+
+                    //is this correct? imgui-rs-vk-renderer does a lot more calculations...
+                    let scissor_offset = vk::Offset2D::builder()
+                        .x(cmd_params.clip_rect[0] as i32)
+                        .y(cmd_params.clip_rect[1] as i32)
+                        .build();
+
+                    let scissor_extent = vk::Extent2D::builder()
+                        .width((cmd_params.clip_rect[2] - cmd_params.clip_rect[0]) as u32)
+                        .height((cmd_params.clip_rect[3] - cmd_params.clip_rect[1]) as u32)
+                        .build();
+        
+                    let scissors = [vk::Rect2D::builder()
+                        .offset(scissor_offset)
+                        .extent(scissor_extent)
+                        .build()];
+
+                    unsafe {
+                        device.cmd_set_scissor(
+                          commandbuffer, 
+                          0, &scissors
+                        );
+                        device.cmd_draw_indexed(
+                            commandbuffer, 
+                            count as u32, 
+                            1, 
+                            index_offset + cmd_params.idx_offset as u32, 
+                            vertex_offset + cmd_params.vtx_offset as i32, 
+                            0
+                        );
+                    }
+                },
+                _ => ()
+            }
+        });
+
+        index_offset += draw_list.idx_buffer().len() as u32;
+        vertex_offset += draw_list.vtx_buffer().len() as i32;
+    });
+    
+}
