@@ -1,0 +1,21 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug",
+            "program": "${workspaceFolder}/target/release/dowaengine_ash",
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "MANGOHUD": "0",
+                "VK_INSTANCE_LAYERS": "VK_LAYER_KHRONOS_validation"
+            },
+            "preLaunchTask": "cargo build release"
+        }
+    ]
+}
